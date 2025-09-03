@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIEM Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+        .card { background: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card-header { font-weight: bold; margin-bottom: 15px; font-size: 18px; }
+        .event { border-bottom: 1px solid #eee; padding: 10px 0; }
+        .event:last-child { border-bottom: none; }
+        .alert { color: #d32f2f; font-weight: bold; }
+        .warning { color: #f57c00; }
+        .info { color: #1976d2; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .stat { text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; }
+        .stat-label { font-size: 14px; color: #666; }
+        button { padding: 8px 16px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-start { background: #4caf50; color: white; }
+        .btn-stop { background: #f44336; color: white; }
+    </style>
+</head>
+<body>
+    <h1>SIEM Dashboard</h1>
+
+    <div class="dashboard">
+        <div class="card">
+            <div class="card-header">Recent Events</div>
+            <div id="events-list">
+                {% for event in events %}
+                <div class="event">
+                    <div><strong>{{ event.source }}</strong> - {{ event.timestamp }}</div>
+                    <div>
+                        {% if event.raw_log.message %}
+                            {{ event.raw_log.message|truncate(100) }}
+                        {% elif event.raw_log.EventID %}
+                            Event ID: {{ event.raw_log.EventID }}
+                        {% elif event.raw_log.signature %}
+                            {{ event.raw_log.signature }}
+                        {% else %}
+                            No message
+                        {% endif %}
+                    </div>
+                    {% if event.alerts %}
+                    <div class="alert">ALERTS: {{ event.alerts|length }}</div>
+                    {% endif %}
+                    {% if event.anomalies %}
+                    <div class="warning">ANOMALIES: {{ event.anomalies|length }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Statistics</div>
+            <div class="stats-grid">
+                <div class="stat">
+                    <div class="stat-value">{{ stats.total_events }}</div>
+                    <div class="stat-label">Total Events</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">{{ stats.alerts_last_hour }}</div>
+                    <div class="stat-label">Alerts (last hour)</div>
+                </div>
+            </div>
+            <div class="card-header">Event Sources</div>
+            <canvas id="sourceChart" width="400" height="200"></canvas>
+        </div>
+
+        <div class="card">
+            <div class="card-header">System Status</div>
+            <div id="system-status">
+                <p>SIEM Status: <span id="siem-status">Running</span></p>
+                <button class="btn-start" onclick="startSIEM()">Start</button>
+                <button class="btn-stop" onclick="stopSIEM()">Stop</button>
+            </div>
+            <div class="card-header">Alert Summary</div>
+            <canvas id="alertChart" width="400" height="200"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Initialize charts
+        const sourceCtx = document.getElementById('sourceChart').getContext('2d');
+        const alertCtx = document.getElementById('alertChart').getContext('2d');
+
+        const sourceChart = new Chart(sourceCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        const alertChart = new Chart(alertCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Alerts by Type',
+                    data: [],
+                    backgroundColor: '#FF6384'
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        function updateCharts() {
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(data => {
+                    // Update source chart
+                    const sources = Object.keys(data.top_sources || {});
+                    const sourceCounts = sources.map(s => data.top_sources[s]);
+
+                    sourceChart.data.labels = sources;
+                    sourceChart.data.datasets[0].data = sourceCounts;
+                    sourceChart.update();
+
+                    // Update alert chart
+                    const alertTypes = Object.keys(data.alert_types || {});
+                    const alertCounts = alertTypes.map(t => data.alert_types[t]);
+
+                    alertChart.data.labels = alertTypes;
+                    alertChart.data.datasets[0].data = alertCounts;
+                    alertChart.update();
+                });
+        }
+
+        function startSIEM() {
+            fetch('/start').then(() => {
+                document.getElementById('siem-status').textContent = 'Running';
+            });
+        }
+
+        function stopSIEM() {
+            fetch('/stop').then(() => {
+                document.getElementById('siem-status').textContent = 'Stopped';
+            });
+        }
+
+        // Initial update
+        updateCharts();
+
+        // Update every 30 seconds
+        setInterval(updateCharts, 30000);
+    </script>
+</body>
+</html>
